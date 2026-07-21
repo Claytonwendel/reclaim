@@ -1,0 +1,53 @@
+import SwiftUI
+import ReclaimCore
+
+// Reclaim Dev — SwiftUI dashboard prototype.
+// Same ReclaimCore engine as the CLI; this is presentation only.
+// Design language per plan §12: "a financial dashboard for storage,
+// not a scary malware cleaner." No red theatrics, no fake urgency.
+
+@main
+struct ReclaimApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var model = ScanModel()
+
+    var body: some Scene {
+        WindowGroup("Reclaim Dev") {
+            DashboardView()
+                .environmentObject(model)
+                .frame(minWidth: 860, minHeight: 560)
+        }
+    }
+}
+
+/// Running from `swift run` (no app bundle): promote to a regular
+/// foreground app so the window appears and takes focus.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+@MainActor
+final class ScanModel: ObservableObject {
+    @Published var report: ScanReport?
+    @Published var scanning = false
+    @Published var currentRecipe = ""
+
+    func runScan() {
+        guard !scanning else { return }
+        scanning = true
+        report = nil
+        Task.detached(priority: .userInitiated) {
+            let scanner = StorageScanner()
+            let result = scanner.scan { name in
+                Task { @MainActor [weak self] in self?.currentRecipe = name }
+            }
+            await MainActor.run { [weak self] in
+                self?.report = result
+                self?.scanning = false
+            }
+        }
+    }
+}
