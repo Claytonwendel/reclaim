@@ -142,3 +142,57 @@ import Foundation
         #expect(scanner.scan(homeOverride: home).isEmpty)
     }
 }
+
+@Suite struct JudgmentScannerTests {
+    private func makeHome() -> (String, URL) {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reclaim-judge-\(UUID().uuidString)")
+        let downloads = home.appendingPathComponent("Downloads")
+        try? FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
+        return (home.path, downloads)
+    }
+
+    private func write(_ url: URL, bytes: Int, modified: Date? = nil) {
+        FileManager.default.createFile(atPath: url.path, contents: Data(count: bytes))
+        if let modified {
+            try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: url.path)
+        }
+    }
+
+    @Test func detectsVideoCluster() {
+        let (home, downloads) = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        for i in 0..<6 { write(downloads.appendingPathComponent("clip\(i).mp4"), bytes: 80 * 1024 * 1024) }
+        let report = JudgmentScanner(inventory: AppInventory(bundleIDs: [], names: [])).scan(homeOverride: home)
+        #expect(report.clusters.contains { $0.category == "Videos" && $0.count == 6 })
+    }
+
+    @Test func detectsExactDuplicate() {
+        let (home, downloads) = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let payload = Data((0..<(5 * 1024 * 1024)).map { UInt8($0 % 251) })
+        try? payload.write(to: downloads.appendingPathComponent("original.bin"))
+        try? payload.write(to: downloads.appendingPathComponent("copy.bin"))
+        let report = JudgmentScanner(inventory: AppInventory(bundleIDs: [], names: [])).scan(homeOverride: home)
+        #expect(report.suggestions.contains { $0.reason == .duplicate })
+    }
+
+    @Test func flagsInstallerForInstalledApp() {
+        let (home, downloads) = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        write(downloads.appendingPathComponent("Zoom-6.1.dmg"), bytes: 120 * 1024 * 1024)
+        let inv = AppInventory(bundleIDs: [], names: ["zoom"])
+        let report = JudgmentScanner(inventory: inv).scan(homeOverride: home)
+        #expect(report.suggestions.contains { $0.reason == .installerForInstalledApp })
+    }
+
+    @Test func everySuggestionIsPersonalTierNeverAutomatable() {
+        let (home, downloads) = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        write(downloads.appendingPathComponent("huge.mov"), bytes: 300 * 1024 * 1024,
+              modified: Date(timeIntervalSince1970: 0))
+        let report = JudgmentScanner(inventory: AppInventory(bundleIDs: [], names: [])).scan(homeOverride: home)
+        // Personal content is Orange or Blue — never Green (auto-runnable).
+        for s in report.suggestions { #expect(s.riskTier != .green) }
+    }
+}

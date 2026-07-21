@@ -186,7 +186,75 @@ case "orphans":
     }
     print("\nSafety: Apple/system components are allowlisted and never flagged.")
 
+case "review":
+    // The judgment layer: personal files you might not want anymore.
+    if !wantsJSON {
+        FileHandle.standardError.write(Data("Reclaim review (read-only) — looking for personal files you may not need…\n".utf8))
+    }
+    let judge = JudgmentScanner()
+    let report = judge.scan()
+
+    if wantsJSON {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        print(String(data: try encoder.encode(report), encoding: .utf8)!)
+        exit(0)
+    }
+
+    func reasonTitle(_ r: SuggestionReason) -> String {
+        switch r {
+        case .oldAndLarge: "Large & untouched for a while"
+        case .veryLarge: "Your biggest files"
+        case .duplicate: "Exact duplicates"
+        case .oldScreenRecording: "Old screen recordings"
+        case .oldScreenshot: "Old screenshots"
+        case .installerForInstalledApp: "Installers for apps you already have"
+        case .oldDownload: "Old downloads"
+        case .oldDeviceBackup: "iPhone/iPad backups"
+        case .oldAttachment: "Old attachments"
+        }
+    }
+
+    let home = NSHomeDirectory()
+    let clusterTotal = report.clusters.reduce(0) { $0 + $1.totalBytes }
+    print("")
+    print("═══ Reclaim Review · personal files you might not need ═══")
+    print("We think you could reclaim up to \(ByteFormatter.string(report.totalBytes + clusterTotal)) here.")
+    print("Everything below is YOUR content — nothing is ever removed without you choosing it.\n")
+
+    // Clusters first — the "death by a thousand cuts" accumulations.
+    if !report.clusters.isEmpty {
+        print("▓▓ Accumulations (many small files adding up) ▓▓")
+        for c in report.clusters {
+            print("── \(c.category) in \(c.directory) · \(ByteFormatter.string(c.totalBytes)) · \(c.count) files")
+            print("   \(c.rationale)")
+            if verbose, !c.samples.isEmpty {
+                print("   e.g. \(c.samples.joined(separator: ", "))")
+            }
+        }
+        print("")
+    }
+
+    for (reason, items) in report.grouped() {
+        let total = items.reduce(0) { $0 + $1.sizeBytes }
+        print("── \(reasonTitle(reason)) · \(ByteFormatter.string(total)) · \(items.count) item(s)")
+        for s in items.prefix(10) {
+            let rel = s.path.hasPrefix(home) ? "~" + s.path.dropFirst(home.count) : s.path
+            let stars = String(repeating: "●", count: Int((s.confidence * 3).rounded()))
+            print(String(format: "  %10@  %@  %@", ByteFormatter.string(s.sizeBytes) as NSString, rel, stars))
+            if verbose { print("              \(s.rationale)") }
+        }
+        if items.count > 10 { print("  … and \(items.count - 10) more") }
+        print("")
+    }
+    if report.suggestions.isEmpty && report.clusters.isEmpty {
+        print("Nothing jumped out. Your personal folders look tidy (or are smaller than the thresholds).")
+    } else {
+        print("● = how confident we are you won't miss it. Run with --verbose to see our reasoning per file.")
+    }
+
 default:
-    print("usage: reclaim [scan|sweep|orphans|recipes] [--json] [--verbose] [--depth N]")
+    print("usage: reclaim [scan|sweep|orphans|review|recipes] [--json] [--verbose] [--depth N]")
     exit(64)
 }
