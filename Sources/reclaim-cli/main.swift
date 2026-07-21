@@ -88,7 +88,51 @@ case "scan":
         print("Tip: grant Full Disk Access to your terminal to scan Messages and app containers.")
     }
 
+case "sweep":
+    // Whole-volume attribution sweep: where ALL the bytes are, and how much
+    // of the disk the recipe catalog can currently explain.
+    var depth = 3
+    if let idx = args.firstIndex(of: "--depth"), let d = Int(args[args.index(after: idx)]) {
+        depth = d
+    }
+    if !wantsJSON {
+        FileHandle.standardError.write(Data("Reclaim sweep (read-only) — walking \(NSHomeDirectory())…\n".utf8))
+    }
+    let sweep = VolumeSweep(depth: depth)
+    let report = sweep.run(progress: { files in
+        FileHandle.standardError.write(Data("  \(files / 1000)k files…\r".utf8))
+    })
+
+    if wantsJSON {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        print(String(data: try encoder.encode(report), encoding: .utf8)!)
+        exit(0)
+    }
+
+    print("")
+    print("═══ Reclaim Sweep · \(report.root) ═══")
+    print("\(ByteFormatter.string(report.totalAllocatedBytes)) allocated · \(report.totalFileCount) files · \(String(format: "%.1f", report.elapsedSeconds))s")
+    if report.skippedProtectedCount > 0 {
+        print("🔒 \(report.skippedProtectedCount) protected location(s) skipped — macOS said no, and Reclaim listens.")
+    }
+    let pct = report.totalAllocatedBytes > 0
+        ? Double(report.explainedBytes) / Double(report.totalAllocatedBytes) * 100 : 0
+    print("Recipe coverage: \(ByteFormatter.string(report.explainedBytes)) explained (\(String(format: "%.0f", pct))%) · \(ByteFormatter.string(report.unexplainedBytes)) unexplained\n")
+
+    let home = NSHomeDirectory()
+    for entry in report.entries {
+        let rel = entry.path.hasPrefix(home) ? "~" + entry.path.dropFirst(home.count) : entry.path
+        let indent = String(repeating: "  ", count: max(0, rel.split(separator: "/").count - 1))
+        let tag = entry.explainedBy.map { "  ✓ \($0)" } ?? ""
+        print(String(format: "  %10@  %@%@%@",
+                     ByteFormatter.string(entry.allocatedBytes) as NSString,
+                     indent, rel, tag))
+    }
+    print("\nDirs ≥ \(ByteFormatter.string(500 * 1024 * 1024)) shown. ✓ = at/below a recipe path; the unexplained rest is recipe-library work to do.")
+
 default:
-    print("usage: reclaim [scan|recipes] [--json] [--verbose]")
+    print("usage: reclaim [scan|sweep|recipes] [--json] [--verbose] [--depth N]")
     exit(64)
 }
