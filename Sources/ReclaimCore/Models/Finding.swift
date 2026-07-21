@@ -51,15 +51,20 @@ public struct ScanReport: Codable, Sendable {
     public let volumeTotalBytes: Int64
     public let volumeFreeBytes: Int64
     public let findings: [Finding]
+    /// APFS local snapshots present at scan time. When non-empty, deleted
+    /// blocks may stay pinned and freed space may not appear immediately.
+    public let snapshots: SnapshotStatus
     public let elapsedSeconds: Double
 
     public init(scannedAt: Date, hostname: String, volumeTotalBytes: Int64,
-                volumeFreeBytes: Int64, findings: [Finding], elapsedSeconds: Double) {
+                volumeFreeBytes: Int64, findings: [Finding],
+                snapshots: SnapshotStatus, elapsedSeconds: Double) {
         self.scannedAt = scannedAt
         self.hostname = hostname
         self.volumeTotalBytes = volumeTotalBytes
         self.volumeFreeBytes = volumeFreeBytes
         self.findings = findings
+        self.snapshots = snapshots
         self.elapsedSeconds = elapsedSeconds
     }
 

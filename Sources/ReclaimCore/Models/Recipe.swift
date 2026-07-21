@@ -13,6 +13,17 @@ public enum ActionMethod: String, Codable, Sendable {
     case none
 }
 
+/// How well-established a recipe's knowledge is. Detection is always safe
+/// (read-only), but only `.verified` recipes may ever gain automated actions.
+public enum RecipeConfidence: String, Codable, Sendable {
+    /// Path + removal method confirmed against primary vendor docs or a
+    /// live verified cleanup (the case study).
+    case verified
+    /// Well-known community path; measure and report, but verify empirically
+    /// before ever enabling an action.
+    case communityKnown
+}
+
 /// A versioned, deterministic detection + (future) action rule.
 /// This is the recipe schema from section 09 of the master plan.
 /// AI may explain findings; only recipes may ever act.
@@ -35,12 +46,16 @@ public struct Recipe: Codable, Identifiable, Sendable {
     public let impact: String
     /// Will it grow back? ("Likely to grow with package installs")
     public let recurrence: String
+    /// Defaults to `.verified` for the original case-study catalog; new
+    /// recipes sourced from community knowledge must pass `.communityKnown`.
+    public let confidence: RecipeConfidence
 
     public init(
         id: String, displayName: String, group: String, paths: [String],
         riskTier: RiskTier, thresholdBytes: Int64 = 50 * 1024 * 1024,
         requiresQuit: [String] = [], action: ActionMethod,
-        explanation: String, impact: String, recurrence: String
+        explanation: String, impact: String, recurrence: String,
+        confidence: RecipeConfidence = .verified
     ) {
         self.id = id
         self.displayName = displayName
@@ -53,5 +68,6 @@ public struct Recipe: Codable, Identifiable, Sendable {
         self.explanation = explanation
         self.impact = impact
         self.recurrence = recurrence
+        self.confidence = confidence
     }
 }

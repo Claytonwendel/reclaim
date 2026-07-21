@@ -60,7 +60,12 @@ case "scan":
 
     // ── Dashboard numbers (section 12: home dashboard panels) ─
     print("  Recoverable now (Green, apps closed):  \(ByteFormatter.string(report.recoverableNowBytes))")
-    print("  Review for more (Yellow + Orange):     \(ByteFormatter.string(report.reviewBytes))\n")
+    print("  Review for more (Yellow + Orange):     \(ByteFormatter.string(report.reviewBytes))")
+    if report.snapshots.mayPinDeletedBlocks {
+        print("  ⧗ \(report.snapshots.count) APFS local snapshot(s) present — freed space may not appear")
+        print("    immediately after cleanup; snapshots expire within ~24h.")
+    }
+    print("")
 
     // ── Findings by tier ──────────────────────────────────────
     for tier in RiskTier.allCases {
@@ -71,9 +76,13 @@ case "scan":
         for f in items {
             let blocked = f.blockingAppRunning ? "  ⏸ app running — quit before cleanup" : ""
             let skipped = f.skippedProtectedPaths.isEmpty ? "" : "  🔒 \(f.skippedProtectedPaths.count) protected path(s) skipped"
-            print(String(format: "  %10@  %@%@%@",
+            // Sparse files (Docker.raw, VM disks): apparent size far exceeds
+            // real allocation — report the honest number, note the illusion.
+            let sparse = f.apparentBytes > f.allocatedBytes * 2
+                ? "  ◱ sparse — appears as \(ByteFormatter.string(f.apparentBytes))" : ""
+            print(String(format: "  %10@  %@%@%@%@",
                          ByteFormatter.string(f.allocatedBytes) as NSString,
-                         f.displayName, blocked, skipped))
+                         f.displayName, blocked, skipped, sparse))
             print("              \(f.path)")
             if verbose {
                 print("              \(f.explanation)")

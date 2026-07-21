@@ -5,7 +5,10 @@ import Foundation
 /// impact language come from the product master plan (sections 11 & 13).
 public enum RecipeCatalog {
 
-    public static let all: [Recipe] = aiTools + apple + javascript + automation + general
+    public static let all: [Recipe] =
+        aiTools + apple + javascript + automation + general
+        + virtualization + aiModels + mediaComms + creative + gaming
+        + languages + system + browsers
 
     // MARK: - AI coding tools
 

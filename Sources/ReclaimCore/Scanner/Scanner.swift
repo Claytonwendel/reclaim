@@ -52,6 +52,7 @@ public struct StorageScanner: Sendable {
             volumeTotalBytes: volume.total,
             volumeFreeBytes: volume.free,
             findings: findings,
+            snapshots: SnapshotProbe.status(),
             elapsedSeconds: Date().timeIntervalSince(start)
         )
     }

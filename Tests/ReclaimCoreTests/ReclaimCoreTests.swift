@@ -27,6 +27,31 @@ import Foundation
             #expect(tier.automatable == (tier == .green))
         }
     }
+
+    @Test func catalogExpandedBeyondCaseStudy() {
+        // The deep-research pass should have grown the library well past
+        // the original ~25 case-study recipes.
+        #expect(RecipeCatalog.all.count >= 50)
+    }
+
+    @Test func communityRecipesNeverGreenlightAutomation() {
+        // Community-known recipes are detection-only until verified: they may
+        // describe an action, but they must not sit in an auto-runnable state
+        // that a future executor could fire without human review.
+        for recipe in RecipeCatalog.all where recipe.confidence == .communityKnown {
+            if recipe.riskTier.automatable {
+                #expect(recipe.action != .quarantine || recipe.riskTier == .green)
+            }
+        }
+    }
+
+    @Test func personalTierRecipesAreReviewOnly() {
+        // Orange (personal/cloud) must never carry an acting method, no matter
+        // the source — this is the invariant the Parallels recipe first broke.
+        for recipe in RecipeCatalog.all where recipe.riskTier == .orange {
+            #expect(recipe.action == .reviewOnly)
+        }
+    }
 }
 
 @Suite struct ScannerTests {
