@@ -141,7 +141,52 @@ case "sweep":
     }
     print("\nDirs ≥ \(ByteFormatter.string(500 * 1024 * 1024)) shown. ✓ = at/below a recipe path; the unexplained rest is recipe-library work to do.")
 
+case "orphans":
+    // Leftover app data whose owning app is no longer installed.
+    if !wantsJSON {
+        FileHandle.standardError.write(Data("Reclaim orphan scan (read-only) — matching Library data against installed apps…\n".utf8))
+    }
+    let scanner = OrphanScanner()
+    let orphans = scanner.scan()
+
+    if wantsJSON {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        print(String(data: try encoder.encode(orphans), encoding: .utf8)!)
+        exit(0)
+    }
+
+    let likely = orphans.filter { $0.confidence == .likelyOrphan }
+    let unattributed = orphans.filter { $0.confidence == .unattributed }
+    let likelyTotal = likely.reduce(0) { $0 + $1.allocatedBytes }
+
+    print("")
+    print("═══ Reclaim Orphans · leftover app data ═══")
+    print("🔵 Likely orphaned (owning app not installed): \(ByteFormatter.string(likelyTotal)) across \(likely.count) item(s)")
+    print("These are Blue-tier — reversible via quarantine. Owning app appears gone.\n")
+
+    let home = NSHomeDirectory()
+    func row(_ o: Orphan) {
+        let rel = o.path.hasPrefix(home) ? "~" + o.path.dropFirst(home.count) : o.path
+        let age = o.lastModified.map { "  · last used \($0.formatted(date: .abbreviated, time: .omitted))" } ?? ""
+        print(String(format: "  %10@  %@%@", ByteFormatter.string(o.allocatedBytes) as NSString, rel, age))
+    }
+    for o in likely { row(o) }
+
+    if !unattributed.isEmpty {
+        let uTotal = unattributed.reduce(0) { $0 + $1.allocatedBytes }
+        print("\n── ❓ Unattributed (couldn't confidently match to an app): \(ByteFormatter.string(uTotal))")
+        print("   Review only — NOT called orphaned. Could belong to a shared component.")
+        for o in unattributed.prefix(15) { row(o) }
+        if unattributed.count > 15 { print("   … and \(unattributed.count - 15) more") }
+    }
+    if orphans.isEmpty {
+        print("No orphaned leftovers found above threshold. Either tidy, or apps live where the inventory didn't look.")
+    }
+    print("\nSafety: Apple/system components are allowlisted and never flagged.")
+
 default:
-    print("usage: reclaim [scan|sweep|recipes] [--json] [--verbose] [--depth N]")
+    print("usage: reclaim [scan|sweep|orphans|recipes] [--json] [--verbose] [--depth N]")
     exit(64)
 }

@@ -84,3 +84,61 @@ import Foundation
         #expect(PathResolver.resolve("~/**/.next/cache").isEmpty)
     }
 }
+
+@Suite struct OrphanScannerTests {
+    /// Build a throwaway home with a Library/Application Support tree.
+    private func makeHome(_ folders: [String]) -> String {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reclaim-orphan-\(UUID().uuidString)")
+        let appSupport = home.appendingPathComponent("Library/Application Support")
+        try? FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        for folder in folders {
+            let dir = appSupport.appendingPathComponent(folder)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            FileManager.default.createFile(
+                atPath: dir.appendingPathComponent("blob.bin").path,
+                contents: Data(count: 30 * 1024 * 1024))
+        }
+        return home.path
+    }
+
+    @Test func flagsBundleIDLeftoverWithNoOwningApp() {
+        let home = makeHome(["com.fake.deadapp"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let scanner = OrphanScanner(
+            inventory: AppInventory(bundleIDs: [], names: []), recipes: [])
+        let orphans = scanner.scan(homeOverride: home)
+        #expect(orphans.contains { $0.folderName == "com.fake.deadapp" && $0.confidence == .likelyOrphan })
+    }
+
+    @Test func neverFlagsAppleComponents() {
+        // The Nektony failure mode: system components must never be orphaned.
+        let home = makeHome(["com.apple.appstore", "com.apple.Safari", "CrashReporter"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let scanner = OrphanScanner(
+            inventory: AppInventory(bundleIDs: [], names: []), recipes: [])
+        let orphans = scanner.scan(homeOverride: home)
+        #expect(orphans.isEmpty)
+    }
+
+    @Test func respectsInstalledApps() {
+        let home = makeHome(["com.installed.app"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let scanner = OrphanScanner(
+            inventory: AppInventory(bundleIDs: ["com.installed.app"], names: []), recipes: [])
+        #expect(scanner.scan(homeOverride: home).isEmpty)
+    }
+
+    @Test func excludesRecipeCoveredPaths() {
+        let home = makeHome(["com.fake.cached"])
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let covered = "\(home)/Library/Application Support/com.fake.cached"
+        let recipe = Recipe(
+            id: "test.cached", displayName: "", group: "", paths: [covered],
+            riskTier: .green, thresholdBytes: 1, action: .quarantine,
+            explanation: "", impact: "", recurrence: "")
+        let scanner = OrphanScanner(
+            inventory: AppInventory(bundleIDs: [], names: []), recipes: [recipe])
+        #expect(scanner.scan(homeOverride: home).isEmpty)
+    }
+}
