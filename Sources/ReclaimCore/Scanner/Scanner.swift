@@ -16,10 +16,14 @@ public struct StorageScanner: Sendable {
         let running = RunningProcessProbe.snapshot()
         var findings: [Finding] = []
 
+        var seenPaths = Set<String>()
         for recipe in recipes {
             progress?(recipe.displayName)
             for rawPath in recipe.paths {
                 for resolved in PathResolver.resolve(rawPath) {
+                    // A path can match more than one glob (e.g. *ShipIt* and
+                    // com.*.ShipIt) or even two recipes — report it once.
+                    guard seenPaths.insert(resolved).inserted else { continue }
                     let measurement = SizeMeasurement.measure(resolved)
                     guard measurement.allocatedBytes >= recipe.thresholdBytes else { continue }
                     let blocking = recipe.requiresQuit.contains { running.contains($0.lowercased()) }

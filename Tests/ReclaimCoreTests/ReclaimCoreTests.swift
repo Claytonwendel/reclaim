@@ -83,6 +83,26 @@ import Foundation
         // Deep globs are deferred in v0 — must return empty, not walk the disk.
         #expect(PathResolver.resolve("~/**/.next/cache").isEmpty)
     }
+
+    @Test func findingsAreDedupedByPath() {
+        // Two recipes (or two globs) pointing at the same path must yield ONE
+        // finding — never a double-count that would inflate totals and fail on
+        // the second quarantine attempt.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reclaim-dedup-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("x").path,
+                                       contents: Data(count: 1024 * 1024))
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let r1 = Recipe(id: "a", displayName: "A", group: "g", paths: [dir.path],
+                        riskTier: .green, thresholdBytes: 1, action: .quarantine,
+                        explanation: "", impact: "", recurrence: "")
+        let r2 = Recipe(id: "b", displayName: "B", group: "g", paths: [dir.path],
+                        riskTier: .green, thresholdBytes: 1, action: .quarantine,
+                        explanation: "", impact: "", recurrence: "")
+        let report = StorageScanner(recipes: [r1, r2]).scan()
+        #expect(report.findings.filter { $0.path == dir.path }.count == 1)
+    }
 }
 
 @Suite struct OrphanScannerTests {
@@ -194,5 +214,92 @@ import Foundation
         let report = JudgmentScanner(inventory: AppInventory(bundleIDs: [], names: [])).scan(homeOverride: home)
         // Personal content is Orange or Blue — never Green (auto-runnable).
         for s in report.suggestions { #expect(s.riskTier != .green) }
+    }
+}
+
+@Suite struct QuarantineTests {
+    private func makeHome() -> String {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reclaim-q-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        return home.path
+    }
+
+    private func makeFile(_ home: String, _ name: String, bytes: Int) -> String {
+        let dir = (home as NSString).appendingPathComponent("junk")
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let path = (dir as NSString).appendingPathComponent(name)
+        FileManager.default.createFile(atPath: path, contents: Data(count: bytes))
+        return path
+    }
+
+    @Test func quarantineThenRestoreReturnsFileIntact() throws {
+        let home = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let payload = Data((0..<4096).map { UInt8($0 % 255) })
+        let path = (home as NSString).appendingPathComponent("junk/data.bin")
+        try? FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try payload.write(to: URL(fileURLWithPath: path))
+
+        let q = Quarantine(home: home, sessionID: "s1")
+        _ = try q.store(path, source: "test")
+        #expect(!FileManager.default.fileExists(atPath: path))   // gone from origin
+
+        let (restored, failed) = try q.restoreAll()
+        #expect(restored.count == 1 && failed.isEmpty)
+        // Content must be byte-identical after the round trip.
+        let after = try Data(contentsOf: URL(fileURLWithPath: path))
+        #expect(after == payload)
+    }
+
+    @Test func storeRefusesMissingSource() {
+        let home = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let q = Quarantine(home: home, sessionID: "s1")
+        #expect(throws: (any Error).self) {
+            _ = try q.store((home as NSString).appendingPathComponent("nope"), source: "test")
+        }
+    }
+
+    @Test func executorNeverTouchesRedTier() {
+        let home = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let path = makeFile(home, "protected.bin", bytes: 1024)
+        let target = CleanupTarget(path: path, riskTier: .red, source: "test")
+        let entry = CleanupExecutor(home: home).run([target], sessionID: "s1")
+        #expect(entry.results.first?.status == .skippedNotAllowed)
+        #expect(FileManager.default.fileExists(atPath: path))   // untouched
+    }
+
+    @Test func greenOnlyModeSkipsYellowAndOrange() {
+        let home = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let yellow = CleanupTarget(path: makeFile(home, "y.bin", bytes: 1024), riskTier: .yellow, source: "t")
+        let orange = CleanupTarget(path: makeFile(home, "o.bin", bytes: 1024), riskTier: .orange, source: "t")
+        let entry = CleanupExecutor(home: home, greenOnly: true).run([yellow, orange], sessionID: "s1")
+        #expect(entry.results.allSatisfy { $0.status == .skippedNotAllowed })
+        #expect(FileManager.default.fileExists(atPath: yellow.path))
+        #expect(FileManager.default.fileExists(atPath: orange.path))
+    }
+
+    @Test func greenTargetIsQuarantinedAndLedgered() {
+        let home = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let green = CleanupTarget(path: makeFile(home, "cache.bin", bytes: 2048), riskTier: .green, source: "t")
+        let entry = CleanupExecutor(home: home).run([green], sessionID: "s1")
+        #expect(entry.results.first?.status == .quarantined)
+        #expect(entry.quarantinedBytes >= 2048)
+        #expect(!FileManager.default.fileExists(atPath: green.path))
+    }
+
+    @Test func runningAppBlocksCleanup() {
+        let home = makeHome()
+        defer { try? FileManager.default.removeItem(atPath: home) }
+        let t = CleanupTarget(path: makeFile(home, "c.bin", bytes: 1024), riskTier: .green,
+                              source: "t", blockingAppRunning: true)
+        let entry = CleanupExecutor(home: home).run([t], sessionID: "s1")
+        #expect(entry.results.first?.status == .skippedAppRunning)
+        #expect(FileManager.default.fileExists(atPath: t.path))
     }
 }

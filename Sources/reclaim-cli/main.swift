@@ -254,7 +254,110 @@ case "review":
         print("● = how confident we are you won't miss it. Run with --verbose to see our reasoning per file.")
     }
 
+case "clean":
+    // Quarantine-based cleanup of Green-tier findings. Dry-run by default;
+    // --apply actually moves items to the reversible quarantine vault.
+    let apply = args.contains("--apply")
+    FileHandle.standardError.write(Data("Reclaim clean — scanning for safe (Green) cleanups…\n".utf8))
+    let report = StorageScanner().scan()
+    let greens = report.findings.filter { $0.riskTier == .green }
+    let targets = greens.map {
+        CleanupTarget(path: $0.path, riskTier: $0.riskTier, source: $0.recipeID,
+                      blockingAppRunning: $0.blockingAppRunning)
+    }
+
+    print("")
+    if !apply {
+        print("═══ Reclaim Clean · DRY RUN ═══")
+        print("These Green-tier items would be moved to the reversible quarantine vault:\n")
+        var wouldFree: Int64 = 0
+        for f in greens {
+            if f.blockingAppRunning {
+                print("  ⏸ skip  \(f.displayName) — quit the owning app first")
+            } else {
+                wouldFree += f.allocatedBytes
+                print(String(format: "  ✓ %10@  %@", ByteFormatter.string(f.allocatedBytes) as NSString, f.displayName))
+            }
+        }
+        print("\nWould quarantine ~\(ByteFormatter.string(wouldFree)). Nothing has been moved.")
+        print("Run `reclaim clean --apply` to do it (reversible via `reclaim restore`).")
+        break
+    }
+
+    // Apply.
+    let df = DateFormatter(); df.dateFormat = "yyyyMMdd-HHmmss"
+    let sessionID = df.string(from: Date())
+    let ledgerEntry = CleanupExecutor(greenOnly: true).run(targets, sessionID: sessionID)
+    try LedgerStore().append(ledgerEntry)
+
+    print("═══ Reclaim Clean · session \(sessionID) ═══")
+    let quarantined = ledgerEntry.results.filter { $0.status == .quarantined }
+    let skipped = ledgerEntry.results.filter { $0.status != .quarantined }
+    for r in quarantined {
+        print(String(format: "  ✓ %10@  %@", ByteFormatter.string(r.bytes) as NSString, (r.path as NSString).lastPathComponent))
+    }
+    for r in skipped {
+        print("  ⏸ \(r.status.rawValue): \((r.path as NSString).lastPathComponent) — \(r.detail)")
+    }
+    print("\nQuarantined \(ByteFormatter.string(ledgerEntry.quarantinedBytes)) · free space \(ledgerEntry.freeDelta >= 0 ? "+" : "")\(ByteFormatter.string(ledgerEntry.freeDelta))")
+    if ledgerEntry.freedSpaceLagging {
+        print("⧗ Free space hasn't caught up yet — \(ledgerEntry.snapshotsPresent) APFS snapshot(s) are")
+        print("  still pinning the freed blocks. Space is released as snapshots expire (~24h).")
+    }
+    print("Undo anytime: reclaim restore \(sessionID)")
+
+case "quarantine":
+    let sessions = Quarantine.sessions()
+    print("═══ Reclaim Quarantine ═══")
+    if sessions.isEmpty { print("Empty. Nothing has been quarantined."); break }
+    for s in sessions {
+        let q = Quarantine(sessionID: s)
+        let entries = (try? q.manifest()) ?? []
+        let total = entries.reduce(0) { $0 + $1.bytes }
+        print("  \(s) · \(entries.count) item(s) · \(ByteFormatter.string(total))")
+    }
+    let lifetime = LedgerStore().lifetimeQuarantinedBytes
+    print("\nLifetime reclaimed: \(ByteFormatter.string(lifetime))")
+    print("Restore: reclaim restore <session> · Delete permanently: reclaim purge <session> --apply")
+
+case "restore":
+    guard let sessionID = args.dropFirst().first(where: { !$0.hasPrefix("-") }) else {
+        print("usage: reclaim restore <session-id>"); exit(64)
+    }
+    let (restored, failed) = try Quarantine(sessionID: sessionID).restoreAll()
+    print("Restored \(restored.count) item(s) to their original locations.")
+    if !failed.isEmpty {
+        print("Could not restore \(failed.count) (missing, or something now exists at the origin):")
+        for f in failed { print("  • \(f)") }
+    }
+
+case "purge":
+    guard let sessionID = args.dropFirst().first(where: { !$0.hasPrefix("-") }) else {
+        print("usage: reclaim purge <session-id> --apply"); exit(64)
+    }
+    if !args.contains("--apply") {
+        let q = Quarantine(sessionID: sessionID)
+        let total = ((try? q.manifest()) ?? []).reduce(0) { $0 + $1.bytes }
+        print("Would PERMANENTLY delete quarantine session \(sessionID) (\(ByteFormatter.string(total))).")
+        print("This cannot be undone. Run again with --apply to confirm.")
+        break
+    }
+    try Quarantine(sessionID: sessionID).purge()
+    print("Permanently deleted quarantine session \(sessionID).")
+
 default:
-    print("usage: reclaim [scan|sweep|orphans|review|recipes] [--json] [--verbose] [--depth N]")
+    print("""
+    usage: reclaim <command> [options]
+      scan                 read-only recipe findings
+      sweep [--depth N]    whole-volume attribution + coverage
+      orphans              leftover data from uninstalled apps
+      review               personal files you might not need
+      clean [--apply]      quarantine Green-tier items (dry-run by default)
+      quarantine           list quarantined sessions
+      restore <session>    undo a cleanup session
+      purge <session> --apply   permanently delete quarantined data
+      recipes              list the recipe catalog
+    options: --json  --verbose
+    """)
     exit(64)
 }

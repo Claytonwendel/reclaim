@@ -60,6 +60,35 @@ These did NOT survive verification and remain unsourced:
    DevCleaner partition cleanup, and what users report as missed or dangerous.
    Only 2 competitor data points survived.
 
+## Second research pass — System Data (July 2026, partial)
+This pass hit the org's monthly API spend limit mid-run; synthesis was skipped.
+8 claims survived verification before it stopped. Net: it mostly **confirmed**
+existing coverage rather than adding new paths.
+
+**Verified:**
+- **System Data = snapshots + system/user caches + app data + disk images +
+  browser plugins + logs + temp files.** Almost all already have recipes; the
+  category is opaque because these live in many places, not one. *(3-0)*
+- Time Machine: hourly local snapshots, kept 24h + one of last backup until
+  space needed; macOS counts snapshot space as available and auto-deletes with
+  age/pressure — but NOT reliably (see pass 1). *(3-0, already in SnapshotProbe)*
+- `tmutil deletelocalsnapshots <name>` removes one snapshot; `tmutil
+  thinlocalsnapshots / <bytes> <urgency>` thins to reclaim a target. *(2-0/2-1)*
+- Real-world magnitudes (one reviewer's Mac): 43 GB Xcode simulators, 34 GB iOS
+  backup surfaced as System Data — both already have recipes. *(3-0)*
+- **Refuted:** "System Data is normally ~20 GB and harmless" (0-3) — there is no
+  reliable normal baseline; don't anchor UX to a number.
+
+**Still open (spend limit cut it short):** full contributor size distributions,
+extreme-case root causes (200 GB+/800 GB+ System Data), the competitor category
+matrix, Spotlight-corruption and Safe-Mode-purge diagnosis workflows. Re-run
+when the spend limit resets (Aug 1) or is raised.
+
+**Product takeaway:** "System Data" is not one thing to clean — it's the sum of
+what Reclaim already scans (snapshots, caches, app data, disk images, backups,
+logs). The right UX is to *explain* it: attribute the opaque number to the real
+recipes/orphans/snapshots that compose it. That's the sweep's job, extended.
+
 ## Detection heuristics still to design (the judgment layer)
 - "Personal but probably deletable": old screen recordings, forgotten video
   exports, backups of devices no longer owned, duplicate photo exports.
