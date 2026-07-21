@@ -1,0 +1,10 @@
+# Cloudflare Workers static-site config for reclaimmac.com.
+# No Worker script (`main`) — this is an assets-only deploy that serves the
+# marketing site in ./docs. `npx wrangler deploy` picks this up automatically.
+name = "reclaim"
+compatibility_date = "2026-07-21"
+
+[assets]
+directory = "./docs"
+# html_handling defaults to "auto-trailing-slash" — serves /path from
+# /path.html — which is exactly what this multi-page site needs.
