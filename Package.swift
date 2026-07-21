@@ -12,7 +12,11 @@ let package = Package(
     targets: [
         .target(name: "ReclaimCore"),
         .executableTarget(name: "reclaim-cli", dependencies: ["ReclaimCore"]),
-        .executableTarget(name: "ReclaimApp", dependencies: ["ReclaimCore"]),
+        .executableTarget(
+            name: "ReclaimApp",
+            dependencies: ["ReclaimCore"],
+            resources: [.process("Resources")]
+        ),
         .testTarget(name: "ReclaimCoreTests", dependencies: ["ReclaimCore"]),
     ],
     swiftLanguageModes: [.v6]
