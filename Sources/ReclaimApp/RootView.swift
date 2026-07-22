@@ -76,6 +76,38 @@ struct StatCard: View {
     }
 }
 
+/// Looks up the real icon of a running app by its display name, so blocked
+/// rows can show "[Cursor icon] Cursor". Cached for the session.
+@MainActor
+enum RunningAppIcon {
+    private static var cache: [String: NSImage] = [:]
+
+    static func icon(for name: String) -> NSImage? {
+        if let hit = cache[name] { return hit }
+        let apps = NSWorkspace.shared.runningApplications
+        let match = apps.first { $0.localizedName == name }
+            ?? apps.first { ($0.localizedName ?? "").localizedCaseInsensitiveContains(name) }
+        if let icon = match?.icon { cache[name] = icon; return icon }
+        return nil
+    }
+}
+
+/// A small "[icon] AppName" chip shown next to items blocked by a running app.
+struct AppChip: View {
+    let name: String
+    var body: some View {
+        HStack(spacing: 4) {
+            if let icon = RunningAppIcon.icon(for: name) {
+                Image(nsImage: icon).resizable().frame(width: 14, height: 14)
+            }
+            Text(name).font(.caption)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 2)
+        .background(.quaternary.opacity(0.6), in: Capsule())
+        .foregroundStyle(.secondary)
+    }
+}
+
 /// A colored tier dot + label.
 struct TierBadge: View {
     let tier: RiskTier

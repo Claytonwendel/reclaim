@@ -59,6 +59,7 @@ final class AppModel: ObservableObject {
         let source: String        // recipe id / "orphan" / "review"
         let selectable: Bool      // false for Red, running apps, info-only rows
         let safe: Bool            // part of the pre-selected one-click set
+        var blockingApps: [String] = []  // running apps that block this item
     }
 
     // MARK: - Unified scan
@@ -106,7 +107,7 @@ final class AppModel: ObservableObject {
                      : f.riskTier == .red ? "System-protected. Reclaim reports it but never removes it. " : ""
             out.append(CleanItem(id: f.path, name: f.displayName, detail: note + f.explanation,
                                  bytes: f.allocatedBytes, tier: f.riskTier, source: f.recipeID,
-                                 selectable: selectable, safe: safe))
+                                 selectable: selectable, safe: safe, blockingApps: f.blockingApps))
         }
         for o in orphans where o.confidence == .likelyOrphan {
             out.append(CleanItem(id: o.path, name: "Leftover: \(o.folderName)",

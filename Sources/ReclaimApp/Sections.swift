@@ -196,9 +196,10 @@ struct CleanRow: View {
                     .foregroundStyle(.secondary).frame(width: 16).padding(.top, 1)
             }
             VStack(alignment: .leading, spacing: 3) {
-                HStack {
+                HStack(spacing: 8) {
                     Circle().fill(item.tier.color).frame(width: 7, height: 7)
                     Text(item.name).fontWeight(.medium).lineLimit(1)
+                    ForEach(item.blockingApps, id: \.self) { AppChip(name: $0) }
                     Spacer()
                     Text(Fmt.bytes(item.bytes)).monospacedDigit().foregroundStyle(.secondary)
                 }

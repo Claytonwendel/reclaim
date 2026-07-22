@@ -17,6 +17,9 @@ public struct Finding: Codable, Identifiable, Sendable {
     public let lastModified: Date?
     /// True if a process listed in the recipe's requiresQuit is running now.
     public let blockingAppRunning: Bool
+    /// The names of the running apps that block this finding (from the recipe's
+    /// requiresQuit), e.g. ["Cursor"]. Empty when nothing blocks it.
+    public let blockingApps: [String]
     /// Paths the scanner could not read ("Operation not permitted" = hard stop).
     public let skippedProtectedPaths: [String]
 
@@ -25,6 +28,7 @@ public struct Finding: Codable, Identifiable, Sendable {
         allocatedBytes: Int64, apparentBytes: Int64, riskTier: RiskTier,
         action: ActionMethod, explanation: String, impact: String,
         recurrence: String, lastModified: Date?, blockingAppRunning: Bool,
+        blockingApps: [String] = [],
         skippedProtectedPaths: [String]
     ) {
         self.recipeID = recipeID
@@ -40,6 +44,7 @@ public struct Finding: Codable, Identifiable, Sendable {
         self.recurrence = recurrence
         self.lastModified = lastModified
         self.blockingAppRunning = blockingAppRunning
+        self.blockingApps = blockingApps
         self.skippedProtectedPaths = skippedProtectedPaths
     }
 }

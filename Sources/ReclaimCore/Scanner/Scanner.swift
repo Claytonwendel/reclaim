@@ -26,7 +26,8 @@ public struct StorageScanner: Sendable {
                     guard seenPaths.insert(resolved).inserted else { continue }
                     let measurement = SizeMeasurement.measure(resolved)
                     guard measurement.allocatedBytes >= recipe.thresholdBytes else { continue }
-                    let blocking = recipe.requiresQuit.contains { running.contains($0.lowercased()) }
+                    let blockingApps = recipe.requiresQuit.filter { running.contains($0.lowercased()) }
+                    let blocking = !blockingApps.isEmpty
                     findings.append(Finding(
                         recipeID: recipe.id,
                         displayName: recipe.displayName,
@@ -41,6 +42,7 @@ public struct StorageScanner: Sendable {
                         recurrence: recipe.recurrence,
                         lastModified: measurement.lastModified,
                         blockingAppRunning: blocking,
+                        blockingApps: blockingApps,
                         skippedProtectedPaths: measurement.skippedProtected
                     ))
                 }
