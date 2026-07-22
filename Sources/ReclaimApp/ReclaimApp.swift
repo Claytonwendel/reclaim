@@ -26,10 +26,10 @@ struct ReclaimApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        // Show the Reclaim icon in the Dock even when run via `swift run`
-        // (an SPM executable has no bundled Info.plist icon).
-        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
-           let icon = NSImage(contentsOf: url) {
+        // The packaged .app sets its Dock/Finder icon via Info.plist
+        // (CFBundleIconFile = AppIcon). For `swift run` dev builds there's no
+        // bundle, so fall back to the icns in Resources if it's alongside.
+        if let icon = NSImage(contentsOfFile: "Resources/AppIcon.icns") {
             NSApp.applicationIconImage = icon
         }
         NSApp.activate(ignoringOtherApps: true)

@@ -100,14 +100,14 @@ public struct JudgmentScanner: Sendable {
             let dates = files.compactMap(\.lastModified).sorted()
             let oldest = dates.first, newest = dates.last
             let oldestDays = oldest.map { Int(now.timeIntervalSince($0) / 86400) }
-            let samples = files.sorted { $0.size > $1.size }.prefix(3)
-                .map { ($0.path as NSString).lastPathComponent }
+            let entries = files.sorted { $0.size > $1.size }
+                .map { ClusterFile(path: $0.path, bytes: $0.size, modified: $0.lastModified) }
 
             out.append(Cluster(
                 directory: dir, category: category.plural, count: files.count,
                 totalBytes: total, oldest: oldest, newest: newest,
                 rationale: "\(files.count) \(category.plural.lowercased()) in \(dir) totaling \(ByteFormatter.string(total))\(oldestDays.map { ", oldest from \($0) days ago" } ?? ""). \(category.hint)",
-                riskTier: category.riskTier, samples: Array(samples)))
+                riskTier: category.riskTier, files: entries))
         }
         return out.sorted { $0.totalBytes > $1.totalBytes }
     }

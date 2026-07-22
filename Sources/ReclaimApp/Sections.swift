@@ -23,6 +23,9 @@ struct ScanView: View {
                     .disabled(model.scanning)
             }
         }
+        .sheet(item: $model.openCluster) { cluster in
+            ClusterDetailView(cluster: cluster).environmentObject(model)
+        }
     }
 
     // MARK: States
@@ -77,7 +80,7 @@ struct ScanView: View {
                     Section {
                         ForEach(model.clusters) { clusterRow($0) }
                     } header: { Text("Pile-ups worth a look") }
-                        footer: { Text("Groups of personal files. Open the folder to pick through them.") }
+                        footer: { Text("Groups of personal files. Click one to browse and pick what to remove.") }
                 }
                 if !review.isEmpty {
                     Section {
@@ -166,19 +169,24 @@ struct ScanView: View {
     }
 
     private func clusterRow(_ c: Cluster) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text("\(c.category) in \(c.directory)").fontWeight(.medium)
-                Spacer()
-                Text(Fmt.bytes(c.totalBytes)).monospacedDigit().foregroundStyle(.secondary)
+        Button { model.openCluster = c } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "square.stack.3d.up")
+                    .foregroundStyle(.tint).frame(width: 20)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text("\(c.category) in \(c.directory)").fontWeight(.medium)
+                        Spacer()
+                        Text(Fmt.bytes(c.totalBytes)).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Text(c.rationale).font(.caption).foregroundStyle(.secondary)
+                }
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
             }
-            Text(c.rationale).font(.caption).foregroundStyle(.secondary)
-            Button {
-                NSWorkspace.shared.open(URL(fileURLWithPath: NSString(string: "~/\(c.directory)").expandingTildeInPath))
-            } label: { Text("Open \(c.directory)").font(.caption) }
-                .buttonStyle(.link)
+            .contentShape(Rectangle())
+            .padding(.vertical, 2)
         }
-        .padding(.vertical, 2)
+        .buttonStyle(.plain)
     }
 }
 

@@ -138,9 +138,16 @@ final class AppModel: ObservableObject {
 
     func cleanSelected() {
         let chosen = items.filter { selected.contains($0.id) && $0.selectable }
-        let targets = chosen.map { CleanupTarget(path: $0.id, riskTier: $0.tier, source: $0.source) }
+        reclaim(chosen.map { CleanupTarget(path: $0.id, riskTier: $0.tier, source: $0.source) })
+    }
+
+    /// The shared clean pipeline used by the main list and the media browser.
+    /// Moves targets to the reversible quarantine, records the ledger, then
+    /// jumps to Quarantine so the stage→empty step is obvious, and rescans.
+    func reclaim(_ targets: [CleanupTarget]) {
         guard !targets.isEmpty, busy == nil else { return }
-        busy = "Reclaiming \(Fmt.bytes(selectedBytes))…"
+        let bytes = targets.count
+        busy = "Reclaiming \(bytes) item(s)…"
         Task {
             let entry = await Task.detached(priority: .userInitiated) {
                 let df = DateFormatter(); df.dateFormat = "yyyyMMdd-HHmmss"
@@ -160,6 +167,9 @@ final class AppModel: ObservableObject {
     func toggle(_ id: String, _ on: Bool) {
         if on { selected.insert(id) } else { selected.remove(id) }
     }
+
+    // Media browser: which cluster's files are being browsed in the sheet.
+    @Published var openCluster: Cluster?
 
     // MARK: - Quarantine
 

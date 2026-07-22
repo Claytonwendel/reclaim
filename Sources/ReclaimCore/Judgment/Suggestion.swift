@@ -48,6 +48,20 @@ public struct Suggestion: Codable, Identifiable, Sendable {
     }
 }
 
+/// One file inside a cluster — enough to browse, preview, and act on it.
+public struct ClusterFile: Codable, Identifiable, Sendable {
+    public var id: String { path }
+    public let path: String
+    public let bytes: Int64
+    public let modified: Date?
+
+    public init(path: String, bytes: Int64, modified: Date?) {
+        self.path = path
+        self.bytes = bytes
+        self.modified = modified
+    }
+}
+
 /// An accumulation of many similar files — the "death by a thousand cuts"
 /// pattern the case study identified ("the largest wins are scattered").
 /// One 20 MB video is nothing; 127 of them is 2.5 GB.
@@ -61,12 +75,12 @@ public struct Cluster: Codable, Identifiable, Sendable {
     public let newest: Date?
     public let rationale: String
     public let riskTier: RiskTier
-    /// A few example paths so the user sees what's inside.
-    public let samples: [String]
+    /// Every file in the cluster, largest first — for the in-app browser.
+    public let files: [ClusterFile]
 
     public init(directory: String, category: String, count: Int, totalBytes: Int64,
                 oldest: Date?, newest: Date?, rationale: String,
-                riskTier: RiskTier, samples: [String]) {
+                riskTier: RiskTier, files: [ClusterFile]) {
         self.directory = directory
         self.category = category
         self.count = count
@@ -75,7 +89,7 @@ public struct Cluster: Codable, Identifiable, Sendable {
         self.newest = newest
         self.rationale = rationale
         self.riskTier = riskTier
-        self.samples = samples
+        self.files = files
     }
 }
 

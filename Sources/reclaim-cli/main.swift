@@ -229,8 +229,9 @@ case "review":
         for c in report.clusters {
             print("── \(c.category) in \(c.directory) · \(ByteFormatter.string(c.totalBytes)) · \(c.count) files")
             print("   \(c.rationale)")
-            if verbose, !c.samples.isEmpty {
-                print("   e.g. \(c.samples.joined(separator: ", "))")
+            if verbose, !c.files.isEmpty {
+                let names = c.files.prefix(3).map { ($0.path as NSString).lastPathComponent }
+                print("   e.g. \(names.joined(separator: ", "))")
             }
         }
         print("")
