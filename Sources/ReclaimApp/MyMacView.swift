@@ -172,7 +172,9 @@ func categoryColor(_ key: String) -> Color {
     case "appdata":      .mint
     case "trash":        .brown
     case "userother":    .yellow
-    case "system":       .gray
+    case "systemdata":   .gray
+    case "otherusers":   .indigo
+    case "system":       .secondary
     default:             .secondary
     }
 }

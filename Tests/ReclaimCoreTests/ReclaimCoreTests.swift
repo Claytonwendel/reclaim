@@ -305,7 +305,7 @@ import Foundation
 }
 
 @Suite struct MacStorageMapTests {
-    @Test func classifyRoutesKnownFolders() {
+    @Test func classifyRoutesHomeFolders() {
         let home = "/Users/x"
         #expect(MacStorageMap.classify(home + "/.Trash/old.zip", home: home) == "trash")
         #expect(MacStorageMap.classify(home + "/Library/Caches/foo", home: home) == "developer")
@@ -319,6 +319,20 @@ import Foundation
         #expect(MacStorageMap.classify(home + "/Downloads/big.dmg", home: home) == "downloads")
         #expect(MacStorageMap.classify(home + "/.npm/cache/x", home: home) == "developer")
         #expect(MacStorageMap.classify(home + "/Code/project/main.swift", home: home) == "userother")
+    }
+
+    @Test func classifyRoutesOutOfHomeVolumePaths() {
+        let home = "/Users/x"
+        #expect(MacStorageMap.classify("/Applications/Xcode.app/x", home: home) == "applications")
+        #expect(MacStorageMap.classify("/opt/homebrew/Cellar/foo", home: home) == "developer")
+        #expect(MacStorageMap.classify("/usr/local/lib/foo", home: home) == "developer")
+        #expect(MacStorageMap.classify("/Library/Application Support/Foo/x", home: home) == "systemdata")
+        #expect(MacStorageMap.classify("/private/var/vm/swapfile0", home: home) == "systemdata")
+        #expect(MacStorageMap.classify("/Users/otheruser/Documents/x", home: home) == "otherusers")
+        #expect(MacStorageMap.classify("/Users/Shared/thing", home: home) == "otherusers")
+        // Data-volume prefix is normalized to the familiar form.
+        #expect(MacStorageMap.classify("/System/Volumes/Data/Users/x/Downloads/a", home: home) == "downloads")
+        #expect(MacStorageMap.classify("/System/Volumes/Data/Library/Foo/x", home: home) == "systemdata")
     }
 
     @Test func classifyIsPathBoundaryAware() {
@@ -374,7 +388,9 @@ import Foundation
         try Data(count: 1_000_000).write(to: file)
 
         // Anchor used-bytes above what we'll measure so a remainder appears.
-        let map = MacStorageMap(home: root.path, applicationRoots: [],
+        // scanRootOverride points the walk at the temp tree instead of the
+        // real data volume.
+        let map = MacStorageMap(home: root.path, scanRootOverride: root.path,
                                 capacityOverride: 10_000_000, freeOverride: 4_000_000,
                                 rawFreeOverride: 4_000_000)
         let report = map.run()

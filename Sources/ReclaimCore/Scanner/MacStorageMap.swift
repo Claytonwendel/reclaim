@@ -88,33 +88,43 @@ public struct MacStorageReport: Codable, Sendable {
 /// reconciles to the volume's real used space.
 ///
 /// Accuracy contract: the ONE number we can state with certainty is the
-/// volume's used bytes (capacity − free). We walk everything readable under
-/// home + the Applications folders, classify each file into a familiar
-/// category, then compute the gap `used − measured` as a single honest
-/// "System & other (not itemized)" slice. So the categories always add up to
-/// the disk's actual usage — never a fabricated total. Read-only, always.
+/// volume's used bytes (capacity − free). We walk the entire data volume,
+/// classify each readable file into a familiar category, then compute the gap
+/// `used − measured` as a single honest "macOS System & Snapshots" slice
+/// (the sealed system volume, snapshots, and anything permissions blocked).
+/// So the categories always add up to the disk's actual usage — never a
+/// fabricated total. Read-only, always.
 public struct MacStorageMap: Sendable {
     public let home: String
-    public let applicationRoots: [String]
-    /// Test seams: when nil, the real volume is probed.
+    /// Test seams: when nil, the real volume / data-volume root is used.
+    let scanRootOverride: String?
     let capacityOverride: Int64?
     let freeOverride: Int64?
     let rawFreeOverride: Int64?
 
-    public init(home: String = NSHomeDirectory(),
-                applicationRoots: [String] = ["/Applications",
-                                              NSHomeDirectory() + "/Applications"]) {
-        self.init(home: home, applicationRoots: applicationRoots,
+    public init(home: String = NSHomeDirectory()) {
+        self.init(home: home, scanRootOverride: nil,
                   capacityOverride: nil, freeOverride: nil, rawFreeOverride: nil)
     }
 
-    init(home: String, applicationRoots: [String],
+    init(home: String, scanRootOverride: String?,
          capacityOverride: Int64?, freeOverride: Int64?, rawFreeOverride: Int64?) {
         self.home = home
-        self.applicationRoots = applicationRoots
+        self.scanRootOverride = scanRootOverride
         self.capacityOverride = capacityOverride
         self.freeOverride = freeOverride
         self.rawFreeOverride = rawFreeOverride
+    }
+
+    /// The root to enumerate: the writable data volume, which holds all user
+    /// and system-app data (/Users, /Library, /Applications, Homebrew,
+    /// /private/var all firmlink here). The only thing it excludes is the
+    /// sealed read-only system volume — which is exactly what the remainder
+    /// accounts for. Falls back to `/` on pre-split macOS.
+    func scanRoot() -> String {
+        if let override = scanRootOverride { return override }
+        return FileManager.default.fileExists(atPath: "/System/Volumes/Data")
+            ? "/System/Volumes/Data" : "/"
     }
 
     // MARK: - Category taxonomy
@@ -148,10 +158,16 @@ public struct MacStorageMap: Sendable {
               detail: "Items in the Trash — still using space until emptied."),
         .init(key: "userother", name: "Other User Files", symbol: "folder",
               detail: "Other files in your home folder."),
-        .init(key: "system", name: "System & Other", symbol: "gearshape",
-              detail: "macOS itself, system data, other user accounts, and space "
-                    + "outside your home folder that Reclaim can't itemize without "
-                    + "deeper access. Computed so the total matches your disk exactly."),
+        .init(key: "systemdata", name: "System Files", symbol: "gearshape.2",
+              detail: "System-level app support, caches, logs, virtual-memory swap, "
+                    + "and shared data outside your home folder."),
+        .init(key: "otherusers", name: "Other Users", symbol: "person.2",
+              detail: "Files belonging to other user accounts and the shared folder."),
+        .init(key: "system", name: "macOS System & Snapshots", symbol: "gearshape",
+              detail: "The sealed macOS system volume, virtual-memory swap, and Time "
+                    + "Machine snapshots — plus any files permissions blocked. Mostly "
+                    + "space no app can safely reclaim. Computed so the total matches "
+                    + "your disk exactly."),
     ]
 
     static func spec(_ key: String) -> CategorySpec {
@@ -161,34 +177,61 @@ public struct MacStorageMap: Sendable {
     /// Hidden home directories that are really developer caches, not documents.
     static let devDotDirs = [".npm", ".cache", ".gradle", ".docker", ".m2",
                              ".cargo", ".rustup", ".yarn", ".gem", ".cocoapods",
-                             ".pnpm-store", ".bun", ".deno", ".nuget"]
+                             ".pnpm-store", ".bun", ".deno", ".nuget", ".colima",
+                             ".orbstack", ".lima"]
 
-    /// Maps an absolute path to a category key. Pure and order-sensitive:
-    /// most-specific rules win. Public-ish (internal) so it can be unit-tested.
+    /// Maps an absolute path to a category key. Handles files in the user's
+    /// home *and* elsewhere on the data volume (/Library, Homebrew,
+    /// /private/var, other users). Pure and order-sensitive — most-specific
+    /// rules win. Internal so it can be unit-tested.
     static func classify(_ rawPath: String, home rawHome: String) -> String {
-        // Normalize the /private prefix: macOS directory enumeration emits
-        // /private/var/… while home may be recorded as /var/… (and /tmp, /etc).
-        // Real homes under /Users are untouched.
-        func strip(_ p: String) -> String {
-            p.hasPrefix("/private/") ? String(p.dropFirst("/private".count)) : p
+        // Normalize prefixes so matching is stable: the data volume enumerates
+        // as /System/Volumes/Data/… and firmlinked dirs surface as /private/…
+        // — strip both to their familiar /Users, /Library form.
+        func normalize(_ p: String) -> String {
+            var s = p
+            if s.hasPrefix("/System/Volumes/Data/") {
+                s = String(s.dropFirst("/System/Volumes/Data".count))
+            } else if s == "/System/Volumes/Data" {
+                s = "/"
+            }
+            if s.hasPrefix("/private/") { s = String(s.dropFirst("/private".count)) }
+            return s
         }
-        let path = strip(rawPath), home = strip(rawHome)
-        func under(_ sub: String) -> Bool {
-            let base = home + "/" + sub
-            return path == base || path.hasPrefix(base + "/")
+        let path = normalize(rawPath), home = normalize(rawHome)
+
+        // ── Inside the user's home folder ──────────────────────────────
+        if path == home || path.hasPrefix(home + "/") {
+            func under(_ sub: String) -> Bool {
+                let base = home + "/" + sub
+                return path == base || path.hasPrefix(base + "/")
+            }
+            if under(".Trash") { return "trash" }
+            if under("Library/Developer") || under("Library/Caches") { return "developer" }
+            if under("Library/Mail") { return "mail" }
+            if under("Library/Messages") { return "messages" }
+            if under("Library") { return "appdata" }
+            if under("Pictures") { return "photos" }
+            if under("Movies") { return "movies" }
+            if under("Music") { return "music" }
+            if under("Documents") || under("Desktop") { return "documents" }
+            if under("Downloads") { return "downloads" }
+            for d in devDotDirs where under(d) { return "developer" }
+            return "userother"
         }
-        if under(".Trash") { return "trash" }
-        if under("Library/Developer") || under("Library/Caches") { return "developer" }
-        if under("Library/Mail") { return "mail" }
-        if under("Library/Messages") { return "messages" }
-        if under("Library") { return "appdata" }
-        if under("Pictures") { return "photos" }
-        if under("Movies") { return "movies" }
-        if under("Music") { return "music" }
-        if under("Documents") || under("Desktop") { return "documents" }
-        if under("Downloads") { return "downloads" }
-        for d in devDotDirs where under(d) { return "developer" }
-        return "userother"
+
+        // ── Elsewhere on the data volume ───────────────────────────────
+        func at(_ prefix: String) -> Bool { path == prefix || path.hasPrefix(prefix + "/") }
+        if at("/Applications") { return "applications" }
+        // Homebrew and other user-installed dev tooling.
+        if at("/opt/homebrew") || at("/usr/local") || at("/opt") { return "developer" }
+        // System-level app data, shared support, logs, VM swap, versions store.
+        if at("/Library") || at("/usr") || at("/var") || at("/tmp")
+            || at("/cores") || at("/.DocumentRevisions-V100") || at("/.Spotlight-V100") {
+            return "systemdata"
+        }
+        if at("/Users") { return "otherusers" }  // /Users/Shared and other accounts
+        return "systemdata"
     }
 
     // MARK: - Run
@@ -199,11 +242,6 @@ public struct MacStorageMap: Sendable {
         let used = max(0, facts.capacity - facts.importantFree)
         let purgeable = max(0, facts.importantFree - facts.rawFree)
 
-        // Canonicalize home so path-prefix classification is symlink-safe
-        // (e.g. /var → /private/var). The enumerator inherits this resolved
-        // prefix, so per-file paths line up with `canonicalHome`.
-        let canonicalHome = URL(fileURLWithPath: home).resolvingSymlinksInPath().path
-
         var bytesByKey: [String: Int64] = [:]
         var countByKey: [String: Int] = [:]
         var totalFiles = 0
@@ -212,28 +250,29 @@ public struct MacStorageMap: Sendable {
             .totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .isRegularFileKey,
         ]
 
-        func walk(_ root: String, forceKey: String?) {
-            let url = URL(fileURLWithPath: root).resolvingSymlinksInPath()
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir),
-                  isDir.boolValue else { return }
+        // One pass over the entire data volume — every readable file is
+        // classified by path, so out-of-home space (/Library, Homebrew,
+        // /private/var, other users) is itemized instead of vanishing into the
+        // remainder. Unreadable files (permissions / no FDA) are skipped and
+        // fall into "macOS System & Snapshots".
+        let root = scanRoot()
+        let rootURL = URL(fileURLWithPath: root)
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue {
             let enumerator = FileManager.default.enumerator(
-                at: url, includingPropertiesForKeys: Array(sizeKeys),
+                at: rootURL, includingPropertiesForKeys: Array(sizeKeys),
                 options: [], errorHandler: { _, _ in true })  // skip unreadable, keep going
             while let item = enumerator?.nextObject() as? URL {
                 guard let v = try? item.resourceValues(forKeys: sizeKeys),
                       v.isRegularFile == true else { continue }
                 let bytes = Int64(v.totalFileAllocatedSize ?? v.fileAllocatedSize ?? 0)
-                let key = forceKey ?? Self.classify(item.path, home: canonicalHome)
+                let key = Self.classify(item.path, home: home)
                 bytesByKey[key, default: 0] += bytes
                 countByKey[key, default: 0] += 1
                 totalFiles += 1
                 if totalFiles % 100_000 == 0 { progress?(totalFiles) }
             }
         }
-
-        walk(canonicalHome, forceKey: nil)
-        for appRoot in applicationRoots { walk(appRoot, forceKey: "applications") }
 
         let measured = bytesByKey.values.reduce(0, +)
         let overMeasured = measured > used && used > 0
