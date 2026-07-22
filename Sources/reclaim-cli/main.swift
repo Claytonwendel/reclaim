@@ -141,6 +141,49 @@ case "sweep":
     }
     print("\nDirs ≥ \(ByteFormatter.string(500 * 1024 * 1024)) shown. ✓ = at/below a recipe path; the unexplained rest is recipe-library work to do.")
 
+case "map":
+    // "My Mac": a whole-disk breakdown of where space goes, reconciled to the
+    // volume's real used bytes. Read-only. Shows everything, not just removable.
+    if !wantsJSON {
+        FileHandle.standardError.write(Data("Reclaim map (read-only) — measuring your whole Mac…\n".utf8))
+    }
+    let report = MacStorageMap().run(progress: { files in
+        FileHandle.standardError.write(Data("  \(files / 1000)k files…\r".utf8))
+    })
+
+    if wantsJSON {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        print(String(data: try encoder.encode(report), encoding: .utf8)!)
+        exit(0)
+    }
+
+    print("")
+    print("═══ Reclaim · My Mac · \(report.hostname) ═══")
+    print("\(ByteFormatter.string(report.usedBytes)) used of \(ByteFormatter.string(report.capacityBytes)) · \(ByteFormatter.string(report.freeBytes)) free · \(String(format: "%.1f", report.elapsedSeconds))s")
+    if report.purgeableBytes > 0 {
+        print("Purgeable (OS can reclaim): \(ByteFormatter.string(report.purgeableBytes))")
+    }
+    print("")
+    for c in report.categories {
+        let pct = report.usedBytes > 0 ? Double(c.bytes) / Double(report.usedBytes) * 100 : 0
+        let tag = c.itemized ? "" : "  (not itemized)"
+        print(String(format: "  %10@  %4.0f%%  %@%@",
+                     ByteFormatter.string(c.bytes) as NSString, pct, c.name, tag))
+    }
+    print("")
+    print("Categories reconcile to actual used space (\(ByteFormatter.string(report.usedBytes))).")
+    if report.overMeasured {
+        print("Note: file clones/hardlinks mean categories may overlap — disk total is still exact.")
+    }
+    if report.fullDiskAccess != .granted {
+        print("⚠︎ Full Disk Access is off — Messages, Mail, and protected app data can't be")
+        print("  itemized, so they fall into “System & Other.” Grant it in System Settings →")
+        print("  Privacy & Security → Full Disk Access for an accurate breakdown.")
+    }
+    print("Read-only view. Use `reclaim scan` / `reclaim clean` to reclaim space safely.")
+
 case "orphans":
     // Leftover app data whose owning app is no longer installed.
     if !wantsJSON {
@@ -350,6 +393,7 @@ default:
     print("""
     usage: reclaim <command> [options]
       scan                 read-only recipe findings
+      map                  whole-disk breakdown of where space goes
       sweep [--depth N]    whole-volume attribution + coverage
       orphans              leftover data from uninstalled apps
       review               personal files you might not need

@@ -13,30 +13,65 @@ struct RootView: View {
             .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 260)
             .safeAreaInset(edge: .bottom) { sidebarFooter }
         } detail: {
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .top) { busyBanner }
+            VStack(spacing: 0) {
+                if model.needsFullDiskAccess { FDABanner() }
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .top) { busyBanner }
+            }
         }
-        .task { model.loadQuarantine() }
+        .task {
+            model.loadQuarantine()
+            model.refreshFDA()
+        }
+        // Re-check when the user comes back from System Settings.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshFDA()
+        }
     }
 
     @ViewBuilder private var detail: some View {
         switch model.section {
         case .scan:       ScanView()
+        case .myMac:      MyMacView()
         case .quarantine: QuarantineView()
         }
     }
 
     private var sidebarFooter: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Divider().padding(.bottom, 6)
-            Text("Reclaimed all-time")
-                .font(.caption2).foregroundStyle(.secondary)
-            Text(Fmt.bytes(model.lifetimeReclaimed))
-                .font(.callout.weight(.semibold)).foregroundStyle(.green)
+        VStack(alignment: .leading, spacing: 8) {
+            if model.needsFullDiskAccess { sidebarFDAHint }
+            Divider()
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Reclaimed all-time")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text(Fmt.bytes(model.lifetimeReclaimed))
+                    .font(.callout.weight(.semibold)).foregroundStyle(.green)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 14).padding(.bottom, 12)
+    }
+
+    /// A persistent sidebar nudge — always visible until access is granted.
+    private var sidebarFDAHint: some View {
+        Button { model.openFDASettings() } label: {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lock.shield.fill")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Full Disk Access off")
+                        .font(.caption.weight(.semibold))
+                    Text("Turn on to see & clean everything")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder private var busyBanner: some View {
@@ -116,6 +151,40 @@ struct TierBadge: View {
             Circle().fill(tier.color).frame(width: 8, height: 8)
             Text(tier.displayName)
         }
+    }
+}
+
+/// A prominent, non-dismissible banner shown across every tab while Full Disk
+/// Access is off — because it gates both accurate storage *showing* (the My Mac
+/// map) and safe *saving* (cleaning protected caches). Clearing it is the
+/// single highest-impact thing a new user can do.
+struct FDABanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 22)).foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Turn on Full Disk Access for the full picture")
+                    .font(.callout.weight(.semibold))
+                Text("Without it, macOS hides Messages, Mail, and protected app data — "
+                   + "so your storage looks smaller than it is and some cleanups are off-limits.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            VStack(spacing: 6) {
+                Button { model.openFDASettings() } label: {
+                    Text("Open Settings").frame(minWidth: 108)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.regular)
+                Button("Re-check") { model.refreshFDA() }
+                    .buttonStyle(.link).font(.caption)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(.orange.opacity(0.10))
+        .overlay(alignment: .bottom) { Divider() }
     }
 }
 

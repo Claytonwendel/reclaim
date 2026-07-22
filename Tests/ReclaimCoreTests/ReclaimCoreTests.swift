@@ -303,3 +303,86 @@ import Foundation
         #expect(FileManager.default.fileExists(atPath: t.path))
     }
 }
+
+@Suite struct MacStorageMapTests {
+    @Test func classifyRoutesKnownFolders() {
+        let home = "/Users/x"
+        #expect(MacStorageMap.classify(home + "/.Trash/old.zip", home: home) == "trash")
+        #expect(MacStorageMap.classify(home + "/Library/Caches/foo", home: home) == "developer")
+        #expect(MacStorageMap.classify(home + "/Library/Developer/Xcode/bar", home: home) == "developer")
+        #expect(MacStorageMap.classify(home + "/Library/Mail/x", home: home) == "mail")
+        #expect(MacStorageMap.classify(home + "/Library/Messages/chat.db", home: home) == "messages")
+        #expect(MacStorageMap.classify(home + "/Library/Application Support/App/x", home: home) == "appdata")
+        #expect(MacStorageMap.classify(home + "/Pictures/Lib.photoslibrary/x", home: home) == "photos")
+        #expect(MacStorageMap.classify(home + "/Documents/report.pdf", home: home) == "documents")
+        #expect(MacStorageMap.classify(home + "/Desktop/note.txt", home: home) == "documents")
+        #expect(MacStorageMap.classify(home + "/Downloads/big.dmg", home: home) == "downloads")
+        #expect(MacStorageMap.classify(home + "/.npm/cache/x", home: home) == "developer")
+        #expect(MacStorageMap.classify(home + "/Code/project/main.swift", home: home) == "userother")
+    }
+
+    @Test func classifyIsPathBoundaryAware() {
+        // A sibling that merely shares a prefix must not be miscategorized.
+        let home = "/Users/x"
+        #expect(MacStorageMap.classify(home + "/Downloads2/x", home: home) == "userother")
+        #expect(MacStorageMap.classify(home + "/LibraryStuff/x", home: home) == "userother")
+    }
+
+    @Test func categoriesReconcileToUsedBytes() {
+        // The core accuracy invariant: itemized categories + the computed
+        // remainder sum to EXACTLY the disk's used bytes.
+        let bytes: [String: Int64] = ["documents": 30, "developer": 20, "applications": 10]
+        let cats = MacStorageMap.buildCategories(
+            bytesByKey: bytes, countByKey: [:], usedBytes: 100, measuredBytes: 60)
+        #expect(cats.reduce(0) { $0 + $1.bytes } == 100)
+        let system = cats.first { $0.key == "system" }
+        #expect(system?.bytes == 40)
+        #expect(system?.itemized == false)
+    }
+
+    @Test func categoriesSortedLargestFirst() {
+        let bytes: [String: Int64] = ["documents": 10, "developer": 50]
+        let cats = MacStorageMap.buildCategories(
+            bytesByKey: bytes, countByKey: [:], usedBytes: 100, measuredBytes: 60)
+        #expect(cats.map(\.key) == ["developer", "system", "documents"]) // 50, 40, 10
+    }
+
+    @Test func noRemainderWhenFullyMeasured() {
+        // If we accounted for all used bytes, there is no "System & Other" slice.
+        let bytes: [String: Int64] = ["documents": 100]
+        let cats = MacStorageMap.buildCategories(
+            bytesByKey: bytes, countByKey: [:], usedBytes: 100, measuredBytes: 100)
+        #expect(!cats.contains { $0.key == "system" })
+        #expect(cats.reduce(0) { $0 + $1.bytes } == 100)
+    }
+
+    @Test func fullDiskAccessStatusIsConclusiveOrUndetermined() {
+        // We can't assert granted/denied (depends on the host's TCC state), but
+        // the probe must always return a valid status without crashing, and be
+        // read-only. On a dev Mac at least one probe path typically exists.
+        let status = FullDiskAccess.status()
+        #expect([.granted, .denied, .undetermined].contains(status))
+        #expect(FullDiskAccess.isGranted == (status == .granted))
+    }
+
+    @Test func runWalksTempTreeReconcilesAndStaysReadOnly() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("reclaim-map-\(UUID().uuidString)")
+        let downloads = root.appendingPathComponent("Downloads")
+        try fm.createDirectory(at: downloads, withIntermediateDirectories: true)
+        let file = downloads.appendingPathComponent("big.bin")
+        try Data(count: 1_000_000).write(to: file)
+
+        // Anchor used-bytes above what we'll measure so a remainder appears.
+        let map = MacStorageMap(home: root.path, applicationRoots: [],
+                                capacityOverride: 10_000_000, freeOverride: 4_000_000,
+                                rawFreeOverride: 4_000_000)
+        let report = map.run()
+
+        #expect(report.usedBytes == 6_000_000)
+        #expect(report.categories.reduce(0) { $0 + $1.bytes } == report.usedBytes)
+        #expect(report.categories.contains { $0.key == "downloads" && $0.bytes > 0 })
+        #expect(fm.fileExists(atPath: file.path)) // read-only: nothing removed
+        try? fm.removeItem(at: root)
+    }
+}

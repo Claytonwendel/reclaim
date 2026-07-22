@@ -10,11 +10,13 @@ final class AppModel: ObservableObject {
 
     enum Section: String, CaseIterable, Identifiable {
         case scan       = "Scan"
+        case myMac      = "My Mac"
         case quarantine = "Quarantine"
         var id: String { rawValue }
         var symbol: String {
             switch self {
             case .scan:       "sparkle.magnifyingglass"
+            case .myMac:      "internaldrive"
             case .quarantine: "arrow.uturn.backward.circle"
             }
         }
@@ -31,6 +33,11 @@ final class AppModel: ObservableObject {
     @Published var freeBytes: Int64 = 0
     @Published var totalBytes: Int64 = 0
 
+    // "My Mac" whole-disk storage map (read-only overview of everything).
+    @Published var mapping = false
+    @Published var hasMapped = false
+    @Published var mapReport: MacStorageReport?
+
     /// Paths the user has chosen to clean. Seeded with the safe set after a scan.
     @Published var selected: Set<String> = []
 
@@ -41,6 +48,10 @@ final class AppModel: ObservableObject {
     @Published var lastFreedBytes: Int64?         // actual space freed by last purge
     @Published var lastPurgeSnapshotLag = false
     @Published var busy: String?
+
+    // Full Disk Access — gates accurate storage showing *and* saving.
+    @Published var fdaStatus: FullDiskAccess.Status = .undetermined
+    var needsFullDiskAccess: Bool { fdaStatus == .denied }
 
     /// Total bytes sitting in quarantine right now — reclaimable by emptying.
     var stagedBytes: Int64 { sessions.reduce(0) { $0 + $1.bytes } }
@@ -62,10 +73,31 @@ final class AppModel: ObservableObject {
         var blockingApps: [String] = []  // running apps that block this item
     }
 
+    // MARK: - Full Disk Access
+
+    /// Re-probe FDA off the main thread. Also registers Reclaim in the FDA list
+    /// on first denied attempt, so the user just flips a switch. Call at launch
+    /// and whenever the app regains focus (e.g. back from System Settings).
+    func refreshFDA() {
+        Task {
+            let status = await Task.detached(priority: .utility) { FullDiskAccess.status() }.value
+            self.fdaStatus = status
+        }
+    }
+
+    /// Jump straight to the Full Disk Access pane in System Settings.
+    func openFDASettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+        NSWorkspace.shared.open(url)
+    }
+
     // MARK: - Unified scan
 
     func runEverything() {
         guard !scanning else { return }
+        // A scan here also refreshes the "My Mac" overview, so both tabs stay
+        // in sync — you can start from either one.
+        mapMac()
         scanning = true
         hasScanned = false
         scanReport = nil; orphans = []; review = nil; selected = []
@@ -83,6 +115,22 @@ final class AppModel: ObservableObject {
             self.selected = Set(self.items.filter(\.safe).map(\.id))
             self.scanning = false
             self.hasScanned = true
+        }
+    }
+
+    /// Build the whole-disk "My Mac" map. Independent of the recipe scan so it
+    /// can be launched from either the Scan tab (via `runEverything`) or the
+    /// My Mac tab directly.
+    func mapMac() {
+        guard !mapping else { return }
+        mapping = true
+        Task {
+            let report = await Task.detached(priority: .userInitiated) {
+                MacStorageMap().run()
+            }.value
+            self.mapReport = report
+            self.mapping = false
+            self.hasMapped = true
         }
     }
 
