@@ -9,14 +9,15 @@ import ReclaimCore
 @main
 struct ReclaimApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var model = ScanModel()
+    @StateObject private var model = AppModel()
 
     var body: some Scene {
-        WindowGroup("Reclaim Dev") {
-            DashboardView()
+        WindowGroup("Reclaim") {
+            RootView()
                 .environmentObject(model)
-                .frame(minWidth: 860, minHeight: 560)
+                .frame(minWidth: 940, minHeight: 620)
         }
+        .windowStyle(.titleBar)
     }
 }
 

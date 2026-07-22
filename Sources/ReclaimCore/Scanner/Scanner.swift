@@ -166,6 +166,13 @@ enum RunningProcessProbe {
     }
 }
 
+/// Public read-only access to the data volume's free space, so the app can
+/// measure the *actual* space freed by a purge (moving to quarantine frees
+/// nothing — only permanent deletion does).
+public enum Volume {
+    public static func freeBytes() -> Int64 { VolumeProbe.dataVolume().free }
+}
+
 enum VolumeProbe {
     static func dataVolume() -> (total: Int64, free: Int64) {
         let url = URL(fileURLWithPath: NSHomeDirectory())
