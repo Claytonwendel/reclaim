@@ -9,13 +9,13 @@ import ReclaimCore
 final class AppModel: ObservableObject {
 
     enum Section: String, CaseIterable, Identifiable {
-        case scan       = "Scan"
+        case scan       = "Reclaim"
         case myMac      = "My Mac"
         case quarantine = "Quarantine"
         var id: String { rawValue }
         var symbol: String {
             switch self {
-            case .scan:       "sparkle.magnifyingglass"
+            case .scan:       "arrow.clockwise"
             case .myMac:      "internaldrive"
             case .quarantine: "arrow.uturn.backward.circle"
             }

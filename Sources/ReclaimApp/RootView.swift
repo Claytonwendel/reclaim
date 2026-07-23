@@ -5,16 +5,18 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
 
     var body: some View {
-        NavigationSplitView {
-            List(AppModel.Section.allCases, selection: $model.section) { section in
-                Label(section.rawValue, systemImage: section.symbol)
-                    .tag(section)
-            }
-            .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 260)
-            .safeAreaInset(edge: .bottom) { sidebarFooter }
-        } detail: {
-            VStack(spacing: 0) {
-                if model.needsFullDiskAccess { FDABanner() }
+        // The FDA banner spans the full window top, ABOVE the split view — so it
+        // never interferes with each detail view's own navigationTitle/toolbar.
+        VStack(spacing: 0) {
+            if model.needsFullDiskAccess { FDABanner() }
+            NavigationSplitView {
+                List(AppModel.Section.allCases, selection: $model.section) { section in
+                    Label(section.rawValue, systemImage: section.symbol)
+                        .tag(section)
+                }
+                .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 260)
+                .safeAreaInset(edge: .bottom) { sidebarFooter }
+            } detail: {
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(alignment: .top) { busyBanner }
